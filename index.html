@@ -122,7 +122,7 @@ async function simulate(){
       while(left > expect){
         const {min,max} = pairs[Math.min(step, pairs.length-1)];
         // const rand = parseFloat((randomBetween(min, max) * left / 100).toFixed(2));
-        const rand = parseFloat(randomBetween(min, max).toFixed(2));
+        const rand = Math.round((Math.random() * (max - min) + min) * 100) / 100;
         left -= rand;
         step++;
         log.push({step:step, value:left.toFixed(2), used:`${min}~${max}`, rand});
