@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>随机递减模拟器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+      --bg:#e0e5ec;
+      --shadow-light:#ffffff;
+      --shadow-dark:#a3b1c6;
+  }
+  body{
+      background:var(--bg);
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .neo{
+      border-radius:20px;
+      background:var(--bg);
+      box-shadow: 9px 9px 16px var(--shadow-dark), -9px -9px 16px var(--shadow-light);
+  }
+  .neo-inset{
+      border-radius:12px;
+      background:var(--bg);
+      box-shadow: inset 6px 6px 12px var(--shadow-dark), inset -6px -6px 12px var(--shadow-light);
+  }
+  input, textarea{
+      outline:none;
+      transition:all .3s;
+  }
+  input:focus, textarea:focus{
+      box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light);
+  }
+</style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+<div class="neo w-full max-w-4xl p-8 space-y-6">
+
+  <!-- 1. 数据输入 -->
+  <div>
+    <label class="block text-sm font-semibold text-gray-700 mb-2">请粘贴多行数据（每行：小值 大值）</label>
+    <textarea id="dataInput" rows="6" class="neo-inset w-full p-3 text-sm resize-none"
+              placeholder="12.3 45.6&#10;7.8 22.5&#10;..."></textarea>
+  </div>
+
+  <!-- 2. 模拟次数 -->
+  <div class="flex items-center space-x-4">
+    <label class="text-sm font-semibold text-gray-700">模拟次数</label>
+    <input id="simCount" type="number" value="100" min="1" class="neo-inset w-28 px-3 py-2 text-center">
+  </div>
+
+  <!-- 3. 期望剩余 -->
+  <div class="flex items-center space-x-4">
+    <label class="text-sm font-semibold text-gray-700">期望剩余</label>
+    <input id="expect" type="number" value="5" step="0.01" class="neo-inset w-28 px-3 py-2 text-center">
+  </div>
+
+  <!-- 按钮 -->
+  <button id="runBtn" class="neo px-6 py-2 font-semibold text-gray-700 hover:scale-105 active:scale-95 transition">
+    开始模拟
+  </button>
+  <div id="progressBox" class="hidden mt-4">
+    <div class="text-sm font-semibold text-gray-700 mb-1">模拟进度</div>
+    <div class="neo w-full h-6 rounded-full overflow-hidden">
+      <div id="progressBar" class="bg-sky-400 h-full transition-all duration-200" style="width:0%"></div>
+    </div>
+    <div id="progressText" class="text-center text-sm mt-1 font-medium">0%</div>
+  </div>
+  <!-- 4. 图表 -->
+  <div class="neo p-4">
+    <canvas id="histChart" height="120"></canvas>
+  </div>
+
+  <!-- 5. 日志 & 下载 -->
+  <div id="logPane" class="hidden">
+    <div class="flex justify-between items-center mb-2">
+      <span class="text-sm font-semibold text-gray-700">详细日志（可下载 Excel）</span>
+      <button id="dlBtn" class="neo px-3 py-1 text-xs">下载 Excel</button>
+    </div>
+    <div class="neo-inset h-40 overflow-auto p-2 text-xs" id="logText"></div>
+  </div>
+
+</div>
+
+<script>
+/* ==== 工具 ==== */
+const $ = s => document.querySelector(s);
+const randomBetween = (a,b) => (Math.random()*(b-a)+a).toFixed(2);
+
+/* ==== 主逻辑 ==== */
+async function simulate(){
+  const lines = $('#dataInput').value.trim().split(/\n/).filter(Boolean);
+  if(!lines.length){ alert('请输入数据'); return; }
+
+  const pairs = lines.map(l=>{
+    const [a,b] = l.trim().split(/\s+/).map(Number);
+    return {min:a, max:b};
+  });
+
+  const simCount = +$('#simCount').value;
+  const expect = +$('#expect').value;
+  const initial = 100.0;
+
+  const buckets = new Map();
+  const allLogs = [];
+
+  /* ===== 进度条初始化 ===== */
+  $('#progressBox').classList.remove('hidden');
+  const progressBar = $('#progressBar');
+  const progressText = $('#progressText');
+
+  /* ===== 分批模拟 + 更新进度 ===== */
+  const batch = 20;                      // 每批多少条，可自行调整
+  for(let run=0; run<simCount; run+=batch){
+    const end = Math.min(run+batch, simCount);
+    // 处理一批
+    for(let i=run; i<end; i++){
+      let left = initial, step = 0;
+      const log = [{step:step, value:left.toFixed(2)}];
+      while(left > expect){
+        const {min,max} = pairs[Math.min(step, pairs.length-1)];
+        const rand = parseFloat((randomBetween(min, max) * left / 100).toFixed(2));
+        left -= rand;
+        step++;
+        log.push({step:step, value:left.toFixed(2), used:`${min}~${max}`, rand});
+      }
+      allLogs.push(log);
+      const key = step;
+      buckets.set(key, (buckets.get(key)||0)+1);
+    }
+    // 更新进度条
+    const percent = Math.round((end / simCount) * 100);
+    progressBar.style.width = percent + '%';
+    progressText.textContent = percent + '%';
+    await new Promise(r=>setTimeout(r,0)); // 让浏览器重绘
+  }
+
+  /* === 画分布图 === */
+  const labels = [...buckets.keys()].sort((a,b)=>a-b);
+  const data = labels.map(k=>buckets.get(k));
+  if(window.hChart) window.hChart.destroy();
+  window.hChart = new Chart($('#histChart'),{
+    type:'bar',
+    data:{labels, datasets:[{label:'达到期望次数分布', data, backgroundColor:'#7dd3fc'}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+  });
+
+  /* === 日志展示 === */
+  $('#logPane').classList.remove('hidden');
+  const txt = allLogs.map((log,idx)=>`模拟${idx+1}:\n`+
+      log.map(r=>`  第${r.step}步 剩余${r.value}` + (r.rand?` 本次消耗${r.rand}`:'')).join('\n')
+  ).join('\n\n');
+  $('#logText').innerText = txt;
+
+  /* === Excel 导出 === */
+  const wb = XLSX.utils.book_new();
+  allLogs.forEach((log,idx)=>{
+    const ws = XLSX.utils.json_to_sheet(log);
+    XLSX.utils.book_append_sheet(wb, ws, `模拟${idx+1}`);
+  });
+  $('#dlBtn').onclick = () => XLSX.writeFile(wb,'模拟日志.xlsx');
+}
+
+$('#runBtn').addEventListener('click', simulate);
+</script>
+</body>
+</html>
